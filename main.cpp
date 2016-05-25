@@ -24,7 +24,8 @@ const float MAX_DEPTH = 1.0;
 
 // Poisson
 const float SCALE = 1.25;
-const int   DEPTH = 8;
+const int   DEPTH = 12;
+const float SAMPLES_PER_NODE = 14;
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr Mat2IntegralPointCloud( const cv::Mat& depth_mat, const float focal_length, const float max_depth)
 {
@@ -100,6 +101,7 @@ pcl::PolygonMesh constructMesh( pcl::PointCloud<pcl::PointNormal>::Ptr cloudPtr 
 
     poisson.setDepth(DEPTH);
     poisson.setScale(SCALE);
+    poisson.setSamplesPerNode(SAMPLES_PER_NODE);
 
     pcl::PolygonMesh mesh;
     poisson.reconstruct(mesh);
@@ -119,6 +121,11 @@ void visualiseMesh( pcl::PolygonMesh &mesh )
         viewer.spinOnce (100);
         boost::this_thread::sleep (boost::posix_time::microseconds (100000));
     }
+}
+
+void addTexture(pcl::PolygonMesh &mesh, std::vector<Frame3D> &frames )
+{
+
 }
 
 int main()
