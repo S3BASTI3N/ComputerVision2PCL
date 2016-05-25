@@ -1,10 +1,6 @@
 //
 // Created by sebastien on 23-5-16.
 //
-
-const float MAX_DEPTH = 1.0;
-
-
 #include "Frame3D/Frame3D.h"
 
 #include <pcl/point_types.h>
@@ -23,6 +19,12 @@ const float MAX_DEPTH = 1.0;
 
 #include <opencv2/core/eigen.hpp>
 
+// Depth to point cloud
+const float MAX_DEPTH = 1.0;
+
+// Poisson
+const float SCALE = 1.25;
+const int   DEPTH = 8;
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr Mat2IntegralPointCloud( const cv::Mat& depth_mat, const float focal_length, const float max_depth)
 {
@@ -61,16 +63,10 @@ pcl::PointCloud<pcl::PointNormal>::Ptr computeNormals(pcl::PointCloud<pcl::Point
     return cloud_normals;
 }
 
-void mergePointClouds( pcl::PointCloud<pcl::PointNormal> &mergedCloud )
+void mergePointClouds( std::vector<Frame3D> frames, pcl::PointCloud<pcl::PointNormal> &mergedCloud )
 {
-    std::string fileName;
-    for( int i = 0; i < 7; i++ )
+    for( auto frame : frames )
     {
-
-        // Load depth image with info
-        fileName = "/home/sebastien/Downloads/FinalAssignment_CV2_2016/3dframes/0000" + std::to_string(i) + ".3df";
-        Frame3D frame(fileName);
-
         // Create pointcloud
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloudPtr = Mat2IntegralPointCloud(frame.depth_image_, (float)frame.focal_length_, MAX_DEPTH );
 
@@ -86,31 +82,33 @@ void mergePointClouds( pcl::PointCloud<pcl::PointNormal> &mergedCloud )
 
         mergedCloud += *transformedNormals;
     }
-}
 
-int main()
-{
-
-    pcl::PointCloud<pcl::PointNormal> mergedCloud;
-    mergePointClouds(mergedCloud);
-    pcl::PointCloud<pcl::PointNormal>::ConstPtr mergedCloudPtr(&mergedCloud);
-
-    std::cout << mergedCloudPtr->points.size() << std::endl;
+    std::cout << "Number of points before removing NaNs: " << mergedCloud.points.size() << std::endl;
 
     std::vector<int> indices;
     pcl::removeNaNNormalsFromPointCloud(mergedCloud, mergedCloud, indices );
 
-    std::cout << mergedCloudPtr->points.size() << std::endl;
+    std::cout << "Number of points after removing NaNs: " << mergedCloud.points.size() << std::endl;
+}
 
-    cout << "begin poisson reconstruction" << endl;
+pcl::PolygonMesh constructMesh( pcl::PointCloud<pcl::PointNormal>::Ptr cloudPtr )
+{
     pcl::Poisson<pcl::PointNormal> poisson;
-    //poisson.setSamplesPerNode(3);
 
-    poisson.setDepth(9);
-    poisson.setInputCloud(mergedCloudPtr);
+
+    poisson.setInputCloud(cloudPtr);
+
+    poisson.setDepth(DEPTH);
+    poisson.setScale(SCALE);
+
     pcl::PolygonMesh mesh;
     poisson.reconstruct(mesh);
 
+    return mesh;
+}
+
+void visualiseMesh( pcl::PolygonMesh &mesh )
+{
     pcl::visualization::PCLVisualizer viewer ("Simple Cloud Viewer");
 
     viewer.setBackgroundColor (0, 0, 0);
@@ -121,6 +119,24 @@ int main()
         viewer.spinOnce (100);
         boost::this_thread::sleep (boost::posix_time::microseconds (100000));
     }
+}
 
-    return -1;
+int main()
+{
+
+    // Load frames
+    auto frames = Frame3D::loadFrames("/home/sebastien/Downloads/FinalAssignment_CV2_2016/3dframes/");
+
+    // Merge clouds
+    pcl::PointCloud<pcl::PointNormal> mergedCloud;
+    pcl::PointCloud<pcl::PointNormal>::Ptr mergedCloudPtr(&mergedCloud);
+    mergePointClouds(frames, mergedCloud);
+
+    // Construct mesh
+    auto mesh = constructMesh (mergedCloudPtr);
+
+    // Visualize mesh
+    visualiseMesh(mesh);
+
+    return 1;
 }
