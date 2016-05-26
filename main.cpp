@@ -18,7 +18,10 @@
 #include <pcl/octree/octree.h>
 #include <pcl/octree/octree_pointcloud_adjacency.h>
 
+#include <pcl/kdtree/kdtree.h>
+
 #include <pcl/surface/texture_mapping.h>
+#include <pcl/surface/impl/texture_mapping.hpp>
 
 #include <pcl/features/integral_image_normal.h>
 
@@ -30,11 +33,11 @@ const float MAX_DEPTH = 1.0;
 
 // Poisson
 const float SCALE = 1.25;
-const int   DEPTH = 9;
+const int   DEPTH = 10;
 const float SAMPLES_PER_NODE = 14;
 
 // Texture
-const float RESOLUTION = 128.0f;
+const float RESOLUTION = 0.01f;
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr Mat2IntegralPointCloud( const cv::Mat& depth_mat, const float focal_length, const float max_depth)
 {
@@ -116,93 +119,16 @@ void visualiseMesh( pcl::PolygonMesh &mesh )
 {
     pcl::visualization::PCLVisualizer viewer ("Simple Cloud Viewer");
 
-    viewer.setBackgroundColor (0, 0, 0);
+    viewer.setBackgroundColor (0.1, 0.1, 0.1);
     viewer.addPolygonMesh(mesh,"meshes",0);
     viewer.addCoordinateSystem (1.0);
     viewer.initCameraParameters ();
+    viewer.setCameraPosition(-1, 1, 1, 0, 0, 0 );
     while (!viewer.wasStopped ()){
         viewer.spinOnce (100);
         boost::this_thread::sleep (boost::posix_time::microseconds (100000));
     }
 }
-
-/*
-bool pointIsOccluded (const pcl::PointXYZ &pt, pcl::octree::OctreePointCloudSearch<pcl::PointXYZ> octree)
-{
-    Eigen::Vector3f direction;
-    direction (0) = pt.x;
-    direction (1) = pt.y;
-    direction (2) = pt.z;
-    std::vector<int> indices;
-    pcl::PointCloud<pcl::PointXYZ>::ConstPtr cloud = octree.getInputCloud();
-    double distance_threshold = octree.getResolution();
-    // raytrace
-    octree.getIntersectedVoxelIndices(direction, -direction, indices);
-    int nbocc = static_cast<int> (indices.size ());
-    for (size_t j = 0; j < indices.size (); j++)
-    {
-        // if intersected point is on the over side of the camera
-        if (pt.z * cloud->points[indices[j]].z < 0)
-        {
-            nbocc--;
-            continue;
-        }
-        if (fabs (cloud->points[indices[j]].z - pt.z) <= distance_threshold)
-        {
-            // points are very close to each-other, we do not consider the occlusion
-            nbocc--;
-        }
-    }
-    return nbocc != 0;
-}
-
-void removeOccludedPoints(const pcl::PointCloud<pcl::PointXYZ> &input_cloud, pcl::PointCloud<pcl::PointXYZ> &filtered_cloud )
-{
-    // variable used to filter occluded points by depth
-    double maxDeltaZ = RESOLUTION;
-    // create an octree to perform rayTracing
-    pcl::octree::OctreePointCloudSearch<pcl::PointXYZ>::Ptr octree (new pcl::octree::OctreePointCloudSearch<pcl::PointXYZ>(RESOLUTION));
-    // create octree structure
-    octree->setInputCloud (input_cloud.makeShared());
-    // update bounding box automatically
-    octree->defineBoundingBox ();
-    // add points in the tree
-    octree->addPointsFromInputCloud ();
-
-    // for each point of the cloud, raycast toward camera and check intersected voxels.
-    Eigen::Vector3f direction;
-    std::vector<int> indices;
-    for (size_t i = 0; i < input_cloud.points.size (); ++i)
-    {
-        direction (0) = input_cloud.points[i].x;
-        direction (1) = input_cloud.points[i].y;
-        direction (2) = input_cloud.points[i].z;
-        // if point is not occluded
-        octree->getIntersectedVoxelIndices (direction, -direction, indices);
-        int nbocc = static_cast<int> (indices.size ());
-        for (size_t j = 0; j < indices.size (); j++)
-        {
-            // if intersected point is on the over side of the camera
-            if (input_cloud.points[i].z * input_cloud.points[indices[j]].z < 0)
-            {
-                nbocc--;
-                continue;
-            }
-            if (fabs (input_cloud.points[indices[j]].z - input_cloud.points[i].z) <= maxDeltaZ)
-            {
-                // points are very close to each-other, we do not consider the occlusion
-                nbocc--;
-            }
-        }
-        if (nbocc == 0)
-        {
-            // point is added in the filtered mesh
-            filtered_cloud.points.push_back (input_cloud.points[i]);
-
-        }
-    }
-}
- */
 
 Eigen::Matrix4f getInverseCameraMatrix( Eigen::Matrix4f &cameraPose )
 {
@@ -233,10 +159,10 @@ void addTexture(pcl::PolygonMesh &mesh, std::vector<Frame3D> &frames )
     pcl::PointCloud<pcl::PointXYZRGB> coloredCloud;
     pcl::copyPointCloud(cloud, coloredCloud);
 
-    cv::Vec3d blue;
-    blue[0] = 255;
-    blue[1] = 0;
-    blue[2] = 0;
+    cv::Vec3d color;
+    color[0] = 255;   // b
+    color[1] = 0;   // g
+    color[2] = 0; // r
 
     int id = 0;
     for( auto frame : frames )
@@ -247,7 +173,7 @@ void addTexture(pcl::PolygonMesh &mesh, std::vector<Frame3D> &frames )
         pcl::PointCloud<pcl::PointXYZ> transformedCloud = pcl::PointCloud<pcl::PointXYZ>();
 
         pcl::TextureMapping<pcl::PointXYZ>::Camera camera;
-        camera.focal_length = focalLength*4;
+        camera.focal_length = focalLength*3.8;
         camera.pose = cameraPose;
         camera.width = frame.rgb_image_.cols;
         camera.height = frame.rgb_image_.rows;
@@ -255,11 +181,10 @@ void addTexture(pcl::PolygonMesh &mesh, std::vector<Frame3D> &frames )
         Eigen::Matrix4f cameraPoseInv = getInverseCameraMatrix( cameraPose );
         pcl::transformPointCloud(cloud, transformedCloud, cameraPoseInv);
 
-        /*
-        pcl::octree::OctreePointCloudSearch<pcl::PointXYZ> octree(RESOLUTION);
-        octree.setInputCloud( transformedCloud.makeShared() );
-        octree.addPointsFromInputCloud();
-         */
+        //pcl::TextureMapping<pcl::PointXYZ>::Octree tree(RESOLUTION);
+        pcl::TextureMapping<pcl::PointXYZ>::Octree::Ptr tree( new pcl::TextureMapping<pcl::PointXYZ>::Octree(RESOLUTION));
+        tree->setInputCloud( transformedCloud.makeShared() );
+        tree->addPointsFromInputCloud();
 
         pcl::PointXYZ cameraPoint;
         cameraPoint.x = cameraPoseInv(0,3);
@@ -272,21 +197,36 @@ void addTexture(pcl::PolygonMesh &mesh, std::vector<Frame3D> &frames )
             for (auto i : polygon.vertices) {
                 pcl::PointXYZ point = transformedCloud.points.at(i);
 
-                Eigen::Vector2f coordinates;
-                if (mapping.getPointUVCoordinates(point, camera, coordinates)) {
-                    int x = (int)(coordinates[0] * camera.width);
-                    int y = (int)(camera.height - (coordinates[1] * camera.height));
+                if( !mapping.isPointOccluded( point, tree ) )
+                {
+                    Eigen::Vector2f coordinates;
+                    if (mapping.getPointUVCoordinates(point, camera, coordinates)) {
+                        int x = (int)(coordinates[0] * camera.width);
+                        int y = (int)(camera.height - (coordinates[1] * camera.height));
 
-                    cv::Vec3b pixel = frame.rgb_image_.at<cv::Vec3b>(cv::Point(x, y));
-                    roi.at<cv::Vec3b>(cv::Point(x, y)) = blue;
+                        cv::Vec3b pixel = frame.rgb_image_.at<cv::Vec3b>(cv::Point(x, y));
+                        roi.at<cv::Vec3b>(cv::Point(x, y)) = color;
 
-                    int b = pixel[0];
-                    int g = pixel[1];
-                    int r = pixel[2];
+                        int b = pixel[0];
+                        int g = pixel[1];
+                        int r = pixel[2];
 
-                    coloredCloud.points.at(i).r = (uint8_t)r;
-                    coloredCloud.points.at(i).g = (uint8_t)g;
-                    coloredCloud.points.at(i).b = (uint8_t)b;
+                        auto coloredPoint = coloredCloud.points.at(i);
+                        if( coloredPoint.r != 0 || coloredPoint.g != 0 || coloredPoint.b != 0 )
+                        {
+                            coloredPoint.r = (coloredPoint.r + (uint8_t)r)/(uint8_t)2;
+                            coloredPoint.g = (coloredPoint.g + (uint8_t)g)/(uint8_t)2;
+                            coloredPoint.b = (coloredPoint.b + (uint8_t)b)/(uint8_t)2;
+                        }
+                        else
+                        {
+                            coloredPoint.r = (uint8_t)r;
+                            coloredPoint.g = (uint8_t)g;
+                            coloredPoint.b = (uint8_t)b;
+                        }
+
+                        coloredCloud.points.at(i) = coloredPoint;
+                    }
                 }
             }
         }
